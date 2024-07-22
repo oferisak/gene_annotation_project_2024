@@ -18,10 +18,12 @@ pseudogenes<-readr::read_delim('./data/pseudogenes.2024-05-17.csv')
 target_info[['twist_v2']]<-list()
 # clinvar disclaimer
 target_info[['twist_v2']][['clinvar']]<-clinvar_data<-readr::read_delim('./data/clinvar_coverage.twist_v2.clinvar_plp_20240708.missing_variants.tsv',delim = '\t')
+target_info[['twist_v2']][['per_gene_clinvar']]<-clinvar_data<-readr::read_delim('./data/clinvar_coverage.twist_v2.clinvar_plp_20240708.per_gene.tsv',delim = '\t')
 # target data
 target_info[['twist_v2']][['gene_coverage']]<-readr::read_delim('./data/twist_v2_vs_refseq.disclaimer.csv',delim = '\t')
 # difficult regions data
 target_info[['twist_v2']][['difficult_regions']]<-readr::read_delim('./data/gene_giab_stratifications.disclaimer.csv',delim = '\t')
+
 
 target_choices<-names(target_info)
 
@@ -53,6 +55,8 @@ ui <- navbarPage(
                style='font-size:100%;')
   ),
   tabPanel("Difficult Regions",
+           div(sliderInput('min_difficult_region_size',label='Select the minimal difficult region size to present',
+                           value=0.2,min = 0,max=1,step = 0.05,width = '500px')),
            div(DT::dataTableOutput(outputId='difficult_regions_table'),
                style='font-size:100%;')
   ),
@@ -60,13 +64,16 @@ ui <- navbarPage(
   tabPanel("Pseudogenes",
            div(DT::dataTableOutput(outputId='pseudogenes_table'),
                style='font-size:100%;')
+  ),
+  tabPanel("Summary table",
+           div(DT::dataTableOutput(outputId='summary_table'),
+               style='font-size:100%;')
   )
 )
 
 # Define server logic required to draw a histogram
 server <- function(input, output) {
   updateSelectizeInput(inputId = 'gene_list_selection', choices = all_gene_symbols, server = TRUE)
-  
   # upload gene list ####
   observeEvent(input$gene_list_file,{
     if (grepl('xls',input$gene_list_file$datapath)){
@@ -102,17 +109,22 @@ server <- function(input, output) {
                                            options=list(pageLength = nrow(target_coverage_table)))
     
     # Difficult regions ####
-    difficult_regions_table<-target_info[[input$target_selection]][['difficult_regions']]%>%
+    dif_regions_cols<-c('AllTandemRepeatsandHomopolymers','chrX_PAR','gc15','gc15to20','gc80to85','gc85','lowmappabilityall','segdups')
+    
+    difficult_regions_table<-reactive({
+      target_info[[input$target_selection]][['difficult_regions']]%>%
       filter(gene%in%input$gene_list_selection)%>%
+      filter(if_any(dif_regions_cols,~.>=input$min_difficult_region_size))%>%
       mutate(gene=factor(gene),
              type=factor(type),
              transcript=factor(transcript))%>%
       relocate(gene,transcript,.before=chr)%>%
       select(-c(info,non_zero_stratifications,strand))
-    output$difficult_regions_table<-renderDT(difficult_regions_table,
+    })
+    output$difficult_regions_table<-renderDT(difficult_regions_table(),
                                            filter = list(
                                              position = 'top', clear = FALSE),
-                                           options=list(pageLength = nrow(difficult_regions_table),
+                                           options=list(pageLength = nrow(difficult_regions_table()),
                                                         scrollX=TRUE, scrollCollapse=TRUE))
     
     # Clinvar variants ####
@@ -133,10 +145,19 @@ server <- function(input, output) {
     # Pseudogenes ####
     pseudogenes_table<-pseudogenes%>%filter(gene_symbol%in%input$gene_list_selection) %>%arrange(desc(number_of_pseudogenes))
     output$pseudogenes_table<-renderDT(pseudogenes_table,
-                                             filter = list(
-                                               position = 'top', clear = FALSE),
+                                             filter = list(position = 'top', clear = FALSE),
                                              options=list(pageLength = nrow(pseudogenes_table),
                                                           scrollX=TRUE, scrollCollapse=TRUE))
+    # Summary table ####
+    pseudogene_summary<-pseudogenes_table%>%
+      mutate(pseudogenes_text=glue('There are {number_of_pseudogenes} pseudogenes ({pseudogenes}).'))%>%
+      select(gene_symbol,pseudogenes_text)
+    
+    summary_table<-pseudogene_summary
+    output$summary_table<-renderDT(summary_table,
+                                   filter = list(position = 'top', clear = FALSE),
+                                   options=list(pageLength = nrow(summary_table),
+                                                scrollX=TRUE, scrollCollapse=TRUE))
   })
 
 }
