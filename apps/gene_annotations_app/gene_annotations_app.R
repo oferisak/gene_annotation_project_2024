@@ -104,20 +104,6 @@ server <- function(input, output) {
     list(input$target_selection,input$gene_list_selection)
   })
   
-  target_coverage_table <- reactive({
-    req(input$target_selection, input$gene_list_selection)
-    readr::read_delim(target_vs_genes[[input$target_selection]]) %>%
-      rename('rate_covered' = overlap_percent) %>%
-      filter(gene %in% input$gene_list_selection) %>%
-      filter(rate_covered <= input$min_exon_covered_size) %>%
-      mutate(gene = factor(gene),
-             type = factor(type),
-             transcript = factor(transcript),
-             bases_not_covered = exon_size - overlap_size) %>%
-      relocate(gene, transcript, .before = chr) %>%
-      select(-c(info, num_o_overlapping_regions, strand, exon_size, overlap_size, total_size))
-  })
-  
   observeEvent(gene_or_target_change(),{
     # Target coverage ####
     target_coverage_table<-reactive({
