@@ -64,7 +64,7 @@ ui <- navbarPage(
                style='font-size:100%;')
   ),
   tabPanel("Difficult Regions",
-           div(sliderInput('min_difficult_region_size',label='Select the minimal difficult region size to present',
+           div(sliderInput('min_difficult_region_size',label='Show exons with at least this rate of difficult regions',
                            value=0.75,min = 0,max=1,step = 0.05,width = '500px')),
            div(DT::dataTableOutput(outputId='difficult_regions_table'),
                style='font-size:100%;')
@@ -103,33 +103,28 @@ server <- function(input, output) {
   gene_or_target_change <- reactive({
     list(input$target_selection,input$gene_list_selection)
   })
+  # Target coverage ####
+  target_coverage_table <- reactive({
+    req(input$target_selection, input$gene_list_selection)
+    readr::read_delim(target_vs_genes[[input$target_selection]]) %>%
+      rename('rate_covered' = overlap_percent) %>%
+      filter(gene %in% input$gene_list_selection) %>%
+      filter(rate_covered <= input$min_exon_covered_size) %>%
+      mutate(gene = factor(gene),
+             type = factor(type),
+             transcript = factor(transcript),
+             bases_not_covered = exon_size - overlap_size) %>%
+      relocate(gene, transcript, .before = chr) %>%
+      select(-c(info, num_o_overlapping_regions, strand, exon_size, overlap_size, total_size))
+  })
   
-  observeEvent(gene_or_target_change(),{
-    # Target coverage ####
-    target_coverage_table<-reactive({
-        tctable<-readr::read_delim(target_vs_genes[[input$target_selection]])%>%
-        rename('rate_covered'=overlap_percent)%>%
-        filter(gene%in%input$gene_list_selection)%>%
-        filter(rate_covered<=input$min_exon_covered_size)%>%
-        mutate(gene=factor(gene),
-               type=factor(type),
-               transcript=factor(transcript),
-               bases_not_covered=exon_size-overlap_size)%>%
-        relocate(gene,transcript,.before=chr)%>%
-        select(-c(info,num_o_overlapping_regions,strand,exon_size,overlap_size,total_size))
-    })
-    output$target_gene_cov_table<-renderDT(target_coverage_table(),
-                                           filter = list(
-                                             position = 'top', clear = FALSE),
-                                           options=list(pageLength = nrow(target_coverage_table())))
-    #print(target_coverage_table())
-    # Difficult regions ####
-    base_cols<-c('chr','start','end','info','strand','exon_num','gene','transcript','size','type','non_zero_stratifications')
-
-    difficult_regions_table<-reactive({
-      drtable<-readr::read_delim(target_vs_giab[[input$target_selection]])
-      dif_regions_cols<-setdiff(colnames(drtable),base_cols)
-      drtable%>%
+  # Difficult regions ####
+  base_cols<-c('chr','start','end','info','strand','exon_num','gene','transcript','size','type','non_zero_stratifications')
+  difficult_regions_table<-reactive({
+    req(input$target_selection, input$gene_list_selection)
+    drtable<-readr::read_delim(target_vs_giab[[input$target_selection]])
+    dif_regions_cols<-setdiff(colnames(drtable),base_cols)
+    drtable%>%
       filter(gene%in%input$gene_list_selection)%>%
       filter(if_any(dif_regions_cols,~.>=input$min_difficult_region_size))%>%
       mutate(gene=factor(gene),
@@ -137,96 +132,118 @@ server <- function(input, output) {
              transcript=factor(transcript))%>%
       relocate(gene,transcript,.before=chr)%>%
       select(-c(info,strand))
-    })
-    output$difficult_regions_table<-renderDT(difficult_regions_table()%>%select(-non_zero_stratifications),
-                                           filter = list(
-                                             position = 'top', clear = FALSE),
-                                           options=list(pageLength = nrow(difficult_regions_table()),
-                                                        scrollX=TRUE, scrollCollapse=TRUE))
-
-    # Clinvar variants ####
-    clinvar_table<-readr::read_delim(target_vs_clinvar_missing[[input$target_selection]])%>%
+  })
+  
+  # Clinvar variants ####
+  clinvar_table<-reactive({
+    req(input$target_selection, input$gene_list_selection)
+    cv_table<-
+      readr::read_delim(target_vs_clinvar_missing[[input$target_selection]])%>%
       filter(gene%in%input$gene_list_selection)%>%
-       mutate(gene=factor(gene),
-              id=factor(id),
-              ref=ifelse(nchar(ref)>30,glue('{substr(ref,1,30)}...'),ref),
-              alt=ifelse(nchar(alt)>30,glue('{substr(alt,1,30)}...'),alt),
-              var=ifelse(nchar(var)>40,glue('{substr(var,1,40)}...'),var))
-    colnames(clinvar_table)<-tolower(colnames(clinvar_table))
-    #   select(-c(info,non_zero_stratifications,strand))
-    output$missing_clinvar_table<-renderDT(clinvar_table,
-                                             filter = list(
-                                               position = 'top', clear = FALSE),
-                                             options=list(pageLength = nrow(clinvar_table),
-                                                          scrollX=TRUE, scrollCollapse=TRUE))
-    # Pseudogenes ####
-    pseudogenes_table<-pseudogenes%>%filter(gene_symbol%in%input$gene_list_selection) %>%arrange(desc(number_of_pseudogenes))
-    output$pseudogenes_table<-renderDT(pseudogenes_table,
-                                             filter = list(position = 'top', clear = FALSE),
-                                             options=list(pageLength = nrow(pseudogenes_table),
-                                                          scrollX=TRUE, scrollCollapse=TRUE))
-    # Summary table ####
+      mutate(gene=factor(gene),
+             id=factor(id),
+             ref=ifelse(nchar(ref)>30,glue('{substr(ref,1,30)}...'),ref),
+             alt=ifelse(nchar(alt)>30,glue('{substr(alt,1,30)}...'),alt),
+             var=ifelse(nchar(var)>40,glue('{substr(var,1,40)}...'),var))
+    colnames(cv_table)<-tolower(colnames(cv_table))
+    cv_table
+  })
+  
+  # Pseudogenes ####
+  pseudogenes_table<-reactive({
+    req(input$target_selection, input$gene_list_selection)
+    pseudogenes%>%filter(gene_symbol%in%input$gene_list_selection) %>%arrange(desc(number_of_pseudogenes))
+  })
+
+  
+  # Summary table ####
+  summary_table<-reactive({
+    req(input$target_selection, input$gene_list_selection)
     ## pseudogenes summary table ####
-    pseudogene_summary<-pseudogenes_table%>%
+    pseudogene_summary<-pseudogenes_table()%>%
       mutate(pseudogenes_text=ifelse(number_of_pseudogenes==1,
                                      glue('There is {number_of_pseudogenes} pseudogene ({pseudogenes}).'),
                                      glue('There are {number_of_pseudogenes} pseudogenes ({pseudogenes}).')))%>%
       select(gene=gene_symbol,pseudogenes_text)
     ## clinvar summary table ####
-    clinvar_summary<-clinvar_table%>%
+    clinvar_summary<-clinvar_table()%>%
       group_by(gene)%>%
       summarize(clinvar_text=ifelse(length(id)>0,
-                                 glue('ClinVar IDs not in target: {paste0(id,collapse="; ")}'),''))%>%
+                                    glue('<b>ClinVar IDs not in target</b>: {paste0(id,collapse="; ")}'),''))%>%
       select(gene,clinvar_text)
     
     ## target coverage summary table ####
     exon_coverage_summary<-target_coverage_table()%>%
       group_by(gene,transcript)%>%
-      summarize(exon_coverage_text=paste0(glue('{exon_num}:{type}:{100*round(rate_covered,3)}'),collapse='; '))%>%
+      summarize(exon_coverage_text=paste0(glue('exon {exon_num}:{type}:{100*round(rate_covered,3)}'),collapse='; '))%>%
       select(gene,transcript,exon_coverage_text)%>%
       ungroup()%>%group_by(gene)%>%
-      summarize(transcript_exon_coverage_text=paste('Exons with incomplete coverage: cds/non-coding: percent covered:<br>',
-               paste0(glue('{transcript}: {exon_coverage_text}'),collapse='<br>')))
+      summarize(transcript_exon_coverage_text=paste('<b>Exons with incomplete coverage: cds/non-coding: percent covered</b>:<br>',
+                                                    paste0(glue('{transcript}: {exon_coverage_text}'),collapse='<br>')))
     
     ## difficult regions summary table
-    # difficult_regions_summary<-
-    #   difficult_regions_table()%>%
-    #   group_by(gene,transcript)%>%
-    #   summarize(exon_difficult_regions_text=paste0(glue('{exon_num}: {non_zero_stratifications}'),collapse='; '))%>%
-    #   ungroup()%>%group_by(gene)%>%
-    #   summarize(difficult_regions_text=paste('Regions difficult to sequence/map:<br>',
-    #                                                 paste0(glue('{transcript}: {exon_difficult_regions_text}'),collapse='<br>')))
-    
-    if (length(input$gene_list_selection)>0){
-      
-      summary_table<-data.frame(gene=input$gene_list_selection)
-      if (nrow(pseudogene_summary)>0){
-        summary_table<-summary_table%>%left_join(pseudogene_summary)
-      }
-      if (nrow(clinvar_summary)>0){
-        summary_table<-summary_table%>%left_join(clinvar_summary)
-      }
-      if (nrow(exon_coverage_summary)>0){
-        summary_table<-summary_table%>%left_join(exon_coverage_summary)
-      }
-      
-      summary_text_cols<-grep('_text',colnames(summary_table),value=T)
-      
-      summary_table<-summary_table%>%
-        rowwise() %>%
-        filter(any(!is.na(across(all_of(summary_text_cols)))))%>%
-        mutate(summary_text = apply(across(all_of(summary_text_cols)), 1, function(x) {
-          paste(na.omit(x), collapse = '<br>')
-        }))
-      
-      output$summary_table<-renderDT(datatable(summary_table%>%select(gene,summary_text),
-                                               escape=FALSE,
-                                               filter = list(position = 'top', clear = FALSE),
-                                               options=list(pageLength = nrow(summary_table),
-                                                            scrollX=TRUE, scrollCollapse=TRUE)))
+    difficult_regions_summary<-
+      difficult_regions_table()%>%
+      group_by(gene,transcript)%>%
+      summarize(exon_difficult_regions_text=paste0(glue('exon {exon_num}: {non_zero_stratifications}'),collapse='; '))%>%
+      ungroup()%>%group_by(gene)%>%
+      summarize(difficult_regions_text=paste('<b>Regions difficult to sequence/map</b>:<br>',
+                                                    paste0(glue('{transcript}: {exon_difficult_regions_text}'),collapse='<br>')))
+    summary_table<-data.frame(gene=input$gene_list_selection)
+    if (nrow(pseudogene_summary)>0){
+      summary_table<-summary_table%>%left_join(pseudogene_summary)
     }
+    if (nrow(clinvar_summary)>0){
+      summary_table<-summary_table%>%left_join(clinvar_summary)
+    }
+    if (nrow(exon_coverage_summary)>0){
+      summary_table<-summary_table%>%left_join(exon_coverage_summary)
+    }
+    if (nrow(difficult_regions_summary)>0){
+      summary_table<-summary_table%>%left_join(difficult_regions_summary)
+    }
+    
+    
+    summary_text_cols<-grep('_text',colnames(summary_table),value=T)
+    
+    summary_table<-summary_table%>%
+      rowwise() %>%
+      filter(any(!is.na(across(all_of(summary_text_cols)))))%>%
+      mutate(summary_text = apply(across(all_of(summary_text_cols)), 1, function(x) {
+        paste(na.omit(x), collapse = '<br>')
+      }))
+  
   })
-
+  
+  # Target coverage ####
+  output$target_gene_cov_table<-renderDT(target_coverage_table(),
+                                         filter = list(
+                                           position = 'top', clear = FALSE),
+                                         options=list(pageLength = nrow(target_coverage_table())))
+  # Difficult regions ####
+  output$difficult_regions_table<-renderDT(difficult_regions_table()%>%select(-non_zero_stratifications),
+                                           filter = list(
+                                             position = 'top', clear = FALSE),
+                                           options=list(pageLength = nrow(difficult_regions_table()),
+                                                        scrollX=TRUE, scrollCollapse=TRUE))
+  
+  
+  #   select(-c(info,non_zero_stratifications,strand))
+  output$missing_clinvar_table<-renderDT(clinvar_table(),
+                                         filter = list(
+                                           position = 'top', clear = FALSE),
+                                         options=list(pageLength = nrow(clinvar_table),
+                                                      scrollX=TRUE, scrollCollapse=TRUE))
+  
+  output$pseudogenes_table<-renderDT(pseudogenes_table(),
+                                     filter = list(position = 'top', clear = FALSE),
+                                     options=list(pageLength = nrow(pseudogenes_table),
+                                                  scrollX=TRUE, scrollCollapse=TRUE))
+  output$summary_table<-renderDT(datatable(summary_table()%>%select(gene,summary_text),
+                                           escape=FALSE,
+                                           filter = list(position = 'top', clear = FALSE),
+                                           options=list(pageLength = nrow(summary_table),
+                                                        scrollX=TRUE, scrollCollapse=TRUE)))
 }
 # Run the application 
 shinyApp(ui = ui, server = server)
