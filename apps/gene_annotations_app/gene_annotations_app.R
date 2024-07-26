@@ -4,6 +4,7 @@ library(DT)
 library(shiny)
 library(glue)
 library(dplyr)
+# TARGET: Target and Gene Region Evaluation Tool
 
 # genes_files
 genes<-readr::read_delim('./data/refseq_basic_gene_transcript.tsv')
@@ -33,20 +34,24 @@ target_choices <- Reduce(intersect, list(target_vs_genes_targets,target_vs_clinv
 # Define UI ####
 ui <- navbarPage(
   theme=shinytheme('flatly'),
-  title = 'Gene Annotation App',
-  
+  title = 'TARGET',
+  # title = tags$div(
+  #   class = "navbar-brand",
+  #   tags$img(src = "target_logo_1.png", height = "60px", alt = "Logo")  # Replace 'your_image.png' with your image file name
+  # ),
+  #title = 'TARGET',
   tabPanel("Gene List Upload",
-           fluidRow(
-             fileInput("gene_list_file", "Select gene list file",
-                       multiple = FALSE,
-                       accept = c(".txt",".csv",".tsv",'.xls','.xlsx')),
-             selectizeInput('gene_list_selection',choices = NULL,selected=NULL,multiple=TRUE,label='Gene List'),
+           
              div(selectizeInput('target_selection', label='Select enrichment kit', multiple=F,choices=target_choices,width = 800,options= list(maxOptions = 5000)), 
                  style='font-size:150%;'),
+             div(fileInput("gene_list_file", "Select gene list file",
+                       multiple = FALSE,width = 800,
+                       accept = c(".txt",".csv",".tsv",'.xls','.xlsx')),style='font-size:150%;'),
+             selectizeInput('gene_list_selection',choices = NULL,selected=NULL,multiple=TRUE,label='Gene List',width = 800),
              div(verbatimTextOutput(outputId = 'num_of_parsed_genes'),style='font-size:125%;'),
              div(DT::dataTableOutput(outputId = 'gene_list_table'), 
-                 style='font-size:125%;')
-           )
+                 style='font-size:150%;')
+           
   ),
   
   tabPanel("Target Coverage",
@@ -79,7 +84,21 @@ ui <- navbarPage(
   tabPanel("Summary table",
            div(DT::dataTableOutput(outputId='summary_table'),
                style='font-size:100%;')
-  )
+  ),
+  # tags$head(tags$style(HTML("
+  #   .navbar-brand {
+  #     padding: 0;
+  #     margin: 0;
+  #   }
+  #   .navbar-nav {
+  #     margin-left: auto;
+  #     margin-right: auto;
+  #   }
+  #   .navbar {
+  #     display: flex;
+  #     align-items: center;
+  #   }
+  # ")))
 )
 
 # Define server logic required to draw a histogram
@@ -242,7 +261,7 @@ server <- function(input, output) {
   output$summary_table<-renderDT(datatable(summary_table()%>%select(gene,summary_text),
                                            escape=FALSE,
                                            filter = list(position = 'top', clear = FALSE),
-                                           options=list(pageLength = nrow(summary_table),
+                                           options=list(pageLength = nrow(summary_table()),
                                                         scrollX=TRUE, scrollCollapse=TRUE)))
 }
 # Run the application 
