@@ -10,9 +10,6 @@ is_filter_clinvar_vcf_for_plp<-TRUE
 # should the clinvar file be converted into hg19 format?
 is_convert_to_hg19<-TRUE
 
-# target options
-target_files<-list('twist_v2'='./data/target_files/twist_hg19_exome_comp_spikein_v2.0.2_targets_sorted.re_annotated_0.pad50.bed',
-                   'cegat_exome_v5'='./data/target_files/S000054_cexome5_hg19_snvs_targets.pad50.bed')
 # clinvar options
 clinvar_files<-list('clinvar_plp_20240708'='./data/clinvar_files/clinvar_20240708.vcf.gz')
 

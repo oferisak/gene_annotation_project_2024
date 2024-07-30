@@ -6,10 +6,6 @@ giab_strats_files<-list.files(giab_strats_folder,recursive = T,pattern = '\\.bed
 
 # genes files
 gene_files<-list('refseq'='./data/accessory_files/GCF_000001405.25_hg19.p13.refseq.bed')
-# target files
-# target options
-target_files<-list('twist_v2'='./data/target_files/twist_hg19_exome_comp_spikein_v2.0.2_targets_sorted.re_annotated_0.pad50.bed',
-                   'cegat_exome_v5'='./data/target_files/S000054_cexome5_hg19_snvs_targets.pad50.bed')
 
 # selected gene file
 gene_file_name<-'refseq'
