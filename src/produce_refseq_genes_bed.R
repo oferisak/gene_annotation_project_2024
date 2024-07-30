@@ -1,6 +1,7 @@
 setwd('/media/SSD/Bioinformatics/Projects/gene_annotation_project_2024/')
 source('./lib/initialization.R')
 
+# the GCF tables were downloaded from : https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/001/405/GCF_000001405.25_GRCh37.p13/
 # chromosome conversion table
 refseq_features<-readr::read_delim('/media/SSD/Bioinformatics/Databases/refseq/GCF_000001405.25_GRCh37.p13_feature_table.txt.gz')
 chromosome_conversion_table<-refseq_features%>%distinct(chromosome,genomic_accession)
@@ -10,14 +11,15 @@ refseq_gff_raw<-readr::read_delim('/media/SSD/Bioinformatics/Databases/refseq/GC
 refseq_gff<-refseq_gff_raw%>%
   mutate(gene=stringr::str_extract(INFO,'gene_id ([^;]+)',group = 1)%>%stringr::str_replace_all('\"',''),
          transcript=stringr::str_extract(INFO,'transcript_id ([^;]+)',group = 1)%>%stringr::str_replace_all('\"',''),
-         exon_num=stringr::str_extract(INFO,'exon_number ([^;]+)',group = 1)%>%stringr::str_replace_all('\"',''))%>%
-  select(genomic_accession,region,start,end,gene,transcript,exon_num,strand)%>%
+         exon_num=stringr::str_extract(INFO,'exon_number ([^;]+)',group = 1)%>%stringr::str_replace_all('\"',''),
+         tag=stringr::str_extract(INFO,'tag ([^;]+)',group = 1)%>%stringr::str_replace_all('\"',''))%>%
+  select(genomic_accession,region,start,end,gene,transcript,tag,exon_num,strand)%>%
   mutate(size=end-start)%>%
   left_join(chromosome_conversion_table)%>%
   mutate(info=glue('{gene}|{transcript}|{exon_num}'))
 
 # produce gene name transcript file
-basic_gene_transcript<-refseq_gff%>%filter(region=='exon')%>%distinct(gene,transcript)
+basic_gene_transcript<-refseq_gff%>%filter(region=='exon')%>%distinct(gene,transcript,tag)
 write.table(basic_gene_transcript,'./output/refseq_basic_gene_transcript.tsv',row.names = F,quote = F,sep='\t')
 options(scipen = 999)
 

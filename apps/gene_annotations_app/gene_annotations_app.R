@@ -6,6 +6,8 @@ library(glue)
 library(dplyr)
 # TARGET: Target and Gene Region Evaluation Tool
 
+# TODO - change the difficult regions to be grouped by type and not exon
+
 # genes_files
 genes<-readr::read_delim('./data/refseq_basic_gene_transcript.tsv')
 all_gene_symbols<-genes%>%pull(gene)%>%unique()
@@ -42,13 +44,21 @@ ui <- navbarPage(
   #title = 'TARGET',
   tabPanel("Gene List Upload",
            
-             div(selectizeInput('target_selection', label='Select enrichment kit', multiple=F,choices=target_choices,width = 800,options= list(maxOptions = 5000)), 
-                 style='font-size:150%;'),
+             div(
+               selectizeInput('target_selection', 
+                              label='Select enrichment kit', multiple=F,choices=target_choices,width = 800,
+                              options= list(maxOptions = 5000)),
+               style='font-size:150%;'),
              div(fileInput("gene_list_file", "Select gene list file",
                        multiple = FALSE,width = 800,
                        accept = c(".txt",".csv",".tsv",'.xls','.xlsx')),style='font-size:150%;'),
              selectizeInput('gene_list_selection',choices = NULL,selected=NULL,multiple=TRUE,label='Gene List',width = 800),
              div(verbatimTextOutput(outputId = 'num_of_parsed_genes'),style='font-size:125%;'),
+             div(
+               checkboxInput('refseq_select',
+                             label='Refseq select only', value = TRUE,width = 800),
+               style='font-size:120%;'
+             ),
              div(DT::dataTableOutput(outputId = 'gene_list_table'), 
                  style='font-size:150%;')
            
@@ -114,20 +124,26 @@ server <- function(input, output) {
     }
     print(gene_list)
     original_genes<-gene_list%>%pull(gene)%>%unique()
-    gene_list<-gene_list%>%filter(gene%in%all_gene_symbols)
+    #gene_list<-gene_list%>%left_join(genes)
     updateSelectizeInput(inputId = 'gene_list_selection', choices = all_gene_symbols,selected=gene_list$gene, server = TRUE)
     output$num_of_parsed_genes<-renderText({glue('Out of {length(original_genes)} input genes, identified {nrow(gene_list)} genes. could not find: {paste0(setdiff(original_genes,gene_list%>%pull(gene)),collapse=", ")}')})
   })
   
-  gene_or_target_change <- reactive({
-    list(input$target_selection,input$gene_list_selection)
+  input_genes<-reactive({
+    req(input$gene_list_selection)
+    gene_list<-genes%>%filter(gene%in%input$gene_list_selection)
+    if (input$refseq_select){gene_list<-gene_list%>%filter(tag=='RefSeq Select')}
+    return(gene_list)
   })
+  
+  output$gene_list_table<-renderDT(input_genes())
+  
   # Target coverage ####
   target_coverage_table <- reactive({
     req(input$target_selection, input$gene_list_selection)
     readr::read_delim(target_vs_genes[[input$target_selection]]) %>%
       rename('rate_covered' = overlap_percent) %>%
-      filter(gene %in% input$gene_list_selection) %>%
+      filter(transcript%in%(input_genes()%>%pull(transcript)))%>%
       filter(rate_covered <= input$min_exon_covered_size) %>%
       mutate(gene = factor(gene),
              type = factor(type),
@@ -144,7 +160,8 @@ server <- function(input, output) {
     drtable<-readr::read_delim(target_vs_giab[[input$target_selection]])
     dif_regions_cols<-setdiff(colnames(drtable),base_cols)
     drtable%>%
-      filter(gene%in%input$gene_list_selection)%>%
+      #filter(gene%in%input$gene_list_selection)%>%
+      filter(transcript%in%(input_genes()%>%pull(transcript)))%>%
       filter(if_any(dif_regions_cols,~.>=input$min_difficult_region_size))%>%
       mutate(gene=factor(gene),
              type=factor(type),
@@ -194,7 +211,7 @@ server <- function(input, output) {
     ## target coverage summary table ####
     exon_coverage_summary<-target_coverage_table()%>%
       group_by(gene,transcript)%>%
-      summarize(exon_coverage_text=paste0(glue('exon {exon_num}:{type}:{100*round(rate_covered,3)}'),collapse='; '))%>%
+      summarize(exon_coverage_text=paste0(glue('exon {exon_num}:{type} ({100*round(rate_covered,3)}%)'),collapse='; '))%>%
       select(gene,transcript,exon_coverage_text)%>%
       ungroup()%>%group_by(gene)%>%
       summarize(transcript_exon_coverage_text=paste('<b>Exons with incomplete coverage: cds/non-coding: percent covered</b>:<br>',
