@@ -4,6 +4,7 @@ library(DT)
 library(shiny)
 library(glue)
 library(dplyr)
+library(tidyr)
 # TARGET: Target and Gene Region Evaluation Tool
 
 # TODO - change the difficult regions to be grouped by type and not exon
@@ -16,7 +17,7 @@ all_gene_symbols<-genes%>%pull(gene)%>%unique()
 pseudogenes<-readr::read_delim('./data/pseudogenes.2024-05-17.csv')
 
 # parse target specific data
-target_files<-list.files('./data/target_data',full.names = T)
+target_files<-list.files('./data/target_data',full.names = T,recursive = T)
 # target vs genes
 target_vs_genes<-grep('incomplete_coverage',target_files,value=T)
 target_vs_genes_targets<-do.call(rbind.data.frame, basename(target_vs_genes)%>%stringr::str_split('\\.'))[,1]
@@ -36,11 +37,10 @@ target_choices <- Reduce(intersect, list(target_vs_genes_targets,target_vs_clinv
 # Define UI ####
 ui <- navbarPage(
   theme=shinytheme('flatly'),
-  title = 'TARGET',
-  # title = tags$div(
-  #   class = "navbar-brand",
-  #   tags$img(src = "target_logo_1.png", height = "60px", alt = "Logo")  # Replace 'your_image.png' with your image file name
-  # ),
+  title = tags$div(
+    class = "navbar-brand",
+    tags$img(src = "target_logo_3.png", height = "60px", alt = "Logo")  # Replace 'your_image.png' with your image file name
+  ),
   #title = 'TARGET',
   tabPanel("Gene List Upload",
            
@@ -79,6 +79,8 @@ ui <- navbarPage(
                style='font-size:100%;')
   ),
   tabPanel("Difficult Regions",
+           h3('Gene regions that are difficult to sequence or map'),
+           br(),
            div(sliderInput('min_difficult_region_size',label='Show exons with at least this rate of difficult regions',
                            value=0.75,min = 0,max=1,step = 0.05,width = '500px')),
            div(DT::dataTableOutput(outputId='difficult_regions_table'),
@@ -95,20 +97,20 @@ ui <- navbarPage(
            div(DT::dataTableOutput(outputId='summary_table'),
                style='font-size:100%;')
   ),
-  # tags$head(tags$style(HTML("
-  #   .navbar-brand {
-  #     padding: 0;
-  #     margin: 0;
-  #   }
-  #   .navbar-nav {
-  #     margin-left: auto;
-  #     margin-right: auto;
-  #   }
-  #   .navbar {
-  #     display: flex;
-  #     align-items: center;
-  #   }
-  # ")))
+  tags$head(tags$style(HTML("
+    .navbar-brand {
+      padding: 0;
+      margin: 0;
+    }
+    .navbar-nav {
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .navbar {
+      display: flex;
+      align-items: center;
+    }
+  ")))
 )
 
 # Define server logic required to draw a histogram
@@ -158,16 +160,29 @@ server <- function(input, output) {
   difficult_regions_table<-reactive({
     req(input$target_selection, input$gene_list_selection)
     drtable<-readr::read_delim(target_vs_giab[[input$target_selection]])
+    # fix names
+    drtable<-drtable%>%
+      rename(
+        'tandem_repeats'='AllTandemRepeats_hg19',
+        'chrx_paralogous_regions'='chrX_PAR_hg19',
+        'gc_below_15'='gc15',
+        'gc_above_85'='gc85',
+        'low_mappability_regions'='lowmappabilityall_hg19',
+        'segmental_duplications'='segdups_hg19'
+      )
     dif_regions_cols<-setdiff(colnames(drtable),base_cols)
     drtable%>%
-      #filter(gene%in%input$gene_list_selection)%>%
       filter(transcript%in%(input_genes()%>%pull(transcript)))%>%
-      filter(if_any(dif_regions_cols,~.>=input$min_difficult_region_size))%>%
+      pivot_longer(-base_cols)%>%
+      #filter(if_any(dif_regions_cols,~.>=input$min_difficult_region_size))%>%
+      filter(value>=input$min_difficult_region_size)%>%
       mutate(gene=factor(gene),
              type=factor(type),
+             region_type=factor(name),
              transcript=factor(transcript))%>%
       relocate(gene,transcript,.before=chr)%>%
-      select(-c(info,strand))
+      relocate(region_type,.before=value)%>%
+      select(-c(info,strand,name))
   })
   
   # Clinvar variants ####
@@ -177,10 +192,11 @@ server <- function(input, output) {
       readr::read_delim(target_vs_clinvar_missing[[input$target_selection]])%>%
       filter(gene%in%input$gene_list_selection)%>%
       mutate(gene=factor(gene),
-             id=factor(id),
+             #id=factor(id),
              ref=ifelse(nchar(ref)>30,glue('{substr(ref,1,30)}...'),ref),
              alt=ifelse(nchar(alt)>30,glue('{substr(alt,1,30)}...'),alt),
-             var=ifelse(nchar(var)>40,glue('{substr(var,1,40)}...'),var))
+             var=ifelse(nchar(var)>40,glue('{substr(var,1,40)}...'),var),
+             id = paste0('<a href="https://www.ncbi.nlm.nih.gov/clinvar/variation/', id, '" target="_blank">', id, '</a>'))
     colnames(cv_table)<-tolower(colnames(cv_table))
     cv_table
   })
@@ -214,17 +230,19 @@ server <- function(input, output) {
       summarize(exon_coverage_text=paste0(glue('exon {exon_num}:{type} ({100*round(rate_covered,3)}%)'),collapse='; '))%>%
       select(gene,transcript,exon_coverage_text)%>%
       ungroup()%>%group_by(gene)%>%
-      summarize(transcript_exon_coverage_text=paste('<b>Exons with incomplete coverage: cds/non-coding: percent covered</b>:<br>',
-                                                    paste0(glue('{transcript}: {exon_coverage_text}'),collapse='<br>')))
+      summarize(transcript_exon_coverage_text=paste('<b>Exons with incomplete coverage: cds/non-coding (percent covered)</b>:<br>',
+                                                    paste0(glue('<i>{transcript}</i>: {exon_coverage_text}'),collapse='<br>')))
     
     ## difficult regions summary table
     difficult_regions_summary<-
       difficult_regions_table()%>%
-      group_by(gene,transcript)%>%
-      summarize(exon_difficult_regions_text=paste0(glue('exon {exon_num}: {non_zero_stratifications}'),collapse='; '))%>%
+      group_by(gene,transcript,region_type)%>%
+      summarize(exon_difficult_regions_text=paste0(glue('exon {exon_num}: {100*round(value,3)}%'),collapse='; '))%>%
+      ungroup()%>%group_by(gene,transcript)%>%
+      summarize(transcript_difficult_regions_text=paste0(glue('{region_type}:{exon_difficult_regions_text}'),collapse='<br>'))%>%
       ungroup()%>%group_by(gene)%>%
       summarize(difficult_regions_text=paste('<b>Regions difficult to sequence/map</b>:<br>',
-                                                    paste0(glue('{transcript}: {exon_difficult_regions_text}'),collapse='<br>')))
+                                                        paste0(glue('<i>{transcript}</i>:<br>{transcript_difficult_regions_text}'),collapse='<br>')))
     summary_table<-data.frame(gene=input$gene_list_selection)
     if (nrow(pseudogene_summary)>0){
       summary_table<-summary_table%>%left_join(pseudogene_summary)
@@ -269,7 +287,8 @@ server <- function(input, output) {
                                          filter = list(
                                            position = 'top', clear = FALSE),
                                          options=list(pageLength = nrow(clinvar_table),
-                                                      scrollX=TRUE, scrollCollapse=TRUE))
+                                                      scrollX=TRUE, scrollCollapse=TRUE),
+                                         escape=FALSE)
   
   output$pseudogenes_table<-renderDT(pseudogenes_table(),
                                      filter = list(position = 'top', clear = FALSE),
